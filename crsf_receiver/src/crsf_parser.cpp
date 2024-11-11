@@ -84,7 +84,7 @@ void CrsfParser::shift_left_rx_buffer(uint8_t cnt)
 
 void CrsfParser::shift_left_rx_buffer_until_byte(uint8_t key)
 {
-    for (unsigned long i = 0; i < rx_buffer.size(); i++)
+    for (unsigned long i = 1; i < rx_buffer.size(); i++)
     {
         if (rx_buffer[i] == key)
         {
