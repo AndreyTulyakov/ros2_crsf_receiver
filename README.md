@@ -4,6 +4,9 @@
 **ROS 2** package for receiving CRSF (RC channels values) packets over serial port (UART).
 
 
+**CRSF protocol** packet format [description](https://github.com/crsf-wg/crsf/wiki/Message-Format).
+
+
 ### Topics
     
 - `rc/channels` - received rc channels values
