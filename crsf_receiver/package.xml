@@ -3,7 +3,7 @@
 <package format="3">
   <name>crsf_receiver</name>
   <version>0.0.1</version>
-  <description>ROS 2 package for receiving CRSF (RC channels values) packets over serial port (UART).</description>
+  <description>ROS 2 CRSF receiver for RC channels and link statistics over UART.</description>
   <maintainer email="mhyhre@gmail.com">Andrey Tulyakov</maintainer>
   <license>MIT</license>
 
@@ -15,6 +15,7 @@
   <depend>serial_driver</depend>
   <depend>io_context</depend>
   <depend>crsf_receiver_msg</depend>
+  <depend>sensor_msgs</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
