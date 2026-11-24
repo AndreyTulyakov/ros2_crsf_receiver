@@ -4,20 +4,25 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+bool set_custom_baudrate(const char* device, unsigned int baudrate)
+{
+    if (baudrate == 0) { return false; }
+    const int fd = ::open(device, O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (fd < 0) { return false; }
 
-bool set_custom_baudrate(const char* device, unsigned int baudrate) {
-    int fd = ::open(device, O_RDWR | O_NOCTTY);
-    if (fd < 0) return false;
-
-    struct termios2 tio;
-    if (::ioctl(fd, TCGETS2, &tio) < 0) { ::close(fd); return false; }
-
-    tio.c_cflag &= ~CBAUD;
-    tio.c_cflag |= CBAUDEX;
-    tio.c_ispeed = baudrate;
-    tio.c_ospeed = baudrate;
-
-    bool ok = (::ioctl(fd, TCSETS2, &tio) == 0);
+    struct termios2 tio{};
+    bool ok = ::ioctl(fd, TCGETS2, &tio) == 0;
+    if (ok) {
+        tio.c_cflag &= ~CBAUD;
+        tio.c_cflag |= BOTHER;
+        tio.c_ispeed = baudrate;
+        tio.c_ospeed = baudrate;
+        ok = ::ioctl(fd, TCSETS2, &tio) == 0;
+    }
+    if (ok) {
+        ok = ::ioctl(fd, TCGETS2, &tio) == 0 &&
+            tio.c_ispeed == baudrate && tio.c_ospeed == baudrate;
+    }
     ::close(fd);
     return ok;
 }

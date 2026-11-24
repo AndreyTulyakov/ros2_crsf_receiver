@@ -1,59 +1,51 @@
 #ifndef CRSF_PARSER_HPP
 #define CRSF_PARSER_HPP
 
-#include <cstring>
 #include <chrono>
+#include <cstddef>
 #include <vector>
 #include "crc8.h"
 #include "crsf_protocol.h"
 #include "crsf_structs.h"
 
-using namespace std;
-
-
+// The caller must serialize access to the parser and its receive buffer.
 class CrsfParser
 {
 public:
-    static const unsigned int CRSF_RC_CHANNELS_TIMEOUT_MS = 50;
-    static const unsigned int CRSF_LINK_STATISTICS_TIMEOUT_MS = 1000;
-    static const unsigned int CRSF_FAILSAFE_STAGE1_MS = 200;
+    static constexpr unsigned int CRSF_RC_CHANNELS_TIMEOUT_MS = 50;
+    static constexpr unsigned int CRSF_LINK_STATISTICS_TIMEOUT_MS = 1000;
+    static constexpr unsigned int CRSF_FAILSAFE_STAGE1_MS = 200;
+    static constexpr unsigned int CRSF_PACKET_TIMEOUT_MS = 100;
 
     CrsfParser();
+    // Also call periodically without new bytes to expire incomplete frames.
     void parse_incoming_bytes();
-    int get_channel_value(unsigned int ch) const { return _channels[ch - 1]; }
-    int* get_channels_values() const { return (int*)_channels; };
-    LinkStatisticsFrame get_link_info() const { return link_statistics_packet; };
+    int get_channel_value(unsigned int ch) const;
+    const int* get_channels_values() const { return _channels; }
+    LinkStatisticsFrame get_link_info() const { return link_statistics_packet; }
+    uint64_t channels_sequence() const { return _channels_sequence; }
+    uint64_t link_statistics_sequence() const { return _link_statistics_sequence; }
+    bool is_channels_actual() const;
+    bool is_link_statistics_actual() const;
+    bool is_link_up() const;
 
-    bool is_channels_actual();
-    bool is_link_statistics_actual();
-    bool is_link_up();
-
-
-    vector<uint8_t> rx_buffer;
+    std::vector<uint8_t> rx_buffer;
 
 private:
+    using Clock = std::chrono::steady_clock;
     Crc8 _crc;
-    
-    std::chrono::time_point<std::chrono::high_resolution_clock> start_time;
+    Clock::time_point _last_channels_time{};
+    Clock::time_point _last_link_statistics_time{};
+    Clock::time_point _last_byte_time{};
+    std::size_t _buffered_size = 0;
+    bool _has_channels = false;
+    bool _has_link_statistics = false;
+    uint64_t _channels_sequence = 0;
+    uint64_t _link_statistics_sequence = 0;
+    LinkStatisticsFrame link_statistics_packet{};
+    int _channels[CRSF_NUM_CHANNELS]{};
 
-    struct Frame _frame;
-
-    uint32_t _last_receive_time;
-    uint32_t _last_channels_time;
-    uint32_t _last_link_statistics_time;
-
-    LinkStatisticsFrame link_statistics_packet;
-    int _channels[CRSF_NUM_CHANNELS];
-
-    void handle_byte_received();
-    void shift_left_rx_buffer(uint8_t cnt);
-    void shift_left_rx_buffer_until_byte(uint8_t key);
-    void process_packet_in();
-    bool is_packet_time_expire();
-
-    void compile_channels_packet(const Frame *p);
-    void compile_link_statistics_packet(const Frame *p);
+    void process_packet_in(uint8_t type, const uint8_t* payload, Clock::time_point now);
 };
 
-
-#endif 
+#endif

@@ -2,6 +2,7 @@
 #define CRSF_RECEIVER_HPP
 
 #include <vector>
+#include <mutex>
 
 
 #include "rclcpp/rclcpp.hpp"
@@ -35,6 +36,12 @@ private:
   std::unique_ptr<SerialDriver>  serial_driver;
 
   CrsfParser parser;
+  std::mutex parser_mutex;
+  uint64_t published_channels_sequence = 0;
+  uint64_t published_link_sequence = 0;
+  bool link_stats = true;
+  unsigned int baudrate = CRSF_BAUDRATE;
+  std::chrono::steady_clock::time_point last_reconnect_attempt;
 
   std::string device;
   rclcpp::TimerBase::SharedPtr timer_;
@@ -43,8 +50,10 @@ private:
   rclcpp::Publisher<CRSFLinkInfo>::SharedPtr link_publisher;
 
   void main_timer_callback();
+  // After construction, serial operations run only on the single I/O thread.
+  void open_serial_port();
   void receive_callback(const std::vector<uint8_t> & buffer, const size_t & bytes_transferred);
 };
 
 
-#endif 
+#endif

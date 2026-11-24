@@ -1,149 +1,125 @@
 #include "crsf_parser.h"
 
-#include "utils.h"
-
+#include <cstring>
+#include <stdexcept>
 
 CrsfParser::CrsfParser() : _crc(0xd5)
 {
-    _last_receive_time = 0;
-    _last_channels_time = 0;
-    _last_link_statistics_time = 0;
-
     rx_buffer.reserve(CRSF_FRAME_SIZE_MAX);
-    
-    start_time = std::chrono::high_resolution_clock::now();
 }
-
 
 void CrsfParser::parse_incoming_bytes()
-{   
-    bool reprocess;
-    do
-    {
-        reprocess = false;
-        if (rx_buffer.size() > 1)
-        {
-            if (rx_buffer[0] == CRSF_SYNC_BYTE) {
-                uint8_t len = rx_buffer[1];
+{
+    const auto now = Clock::now();
+    if (rx_buffer.size() > _buffered_size) {
+        _last_byte_time = now;
+    }
+    const bool expired = now - _last_byte_time >=
+        std::chrono::milliseconds(CRSF_PACKET_TIMEOUT_MS);
 
-                if (len < 3 || len > (CRSF_MAX_PAYLOAD_LEN + 2))
-                {
-                    shift_left_rx_buffer_until_byte(CRSF_SYNC_BYTE);
-                    reprocess = true;
-                }
-
-                else if ((int)rx_buffer.size() >= (len + 2))
-                {
-                    uint8_t in_crc = rx_buffer[2 + len - 1];
-                    uint8_t calculated_crc = _crc.calc(rx_buffer.data() + 2,  len - 1);
-                    if (calculated_crc == in_crc)
-                    {
-                        process_packet_in();
-                    }
-
-                    reprocess = true;
-                    shift_left_rx_buffer(len + 2);
-                } 
-            } else {
-                shift_left_rx_buffer_until_byte(CRSF_SYNC_BYTE);
-                reprocess = true;
+    // Scan with a cursor and compact once. Every rejected candidate advances.
+    std::size_t offset = 0;
+    while (offset < rx_buffer.size()) {
+        if (rx_buffer[offset] != CRSF_SYNC_BYTE) {
+            ++offset;
+            continue;
+        }
+        const auto available = rx_buffer.size() - offset;
+        if (available < 2) {
+            if (expired) { ++offset; }
+            break;
+        }
+        const uint8_t len = rx_buffer[offset + 1];
+        if (len < CRSF_FRAME_LENGTH_TYPE_CRC || len > CRSF_MAX_PACKET_SIZE - 2) {
+            ++offset;
+            continue;
+        }
+        if (available >= 3) {
+            const uint8_t type = rx_buffer[offset + 2];
+            const unsigned int payload_size = len - CRSF_FRAME_LENGTH_TYPE_CRC;
+            if ((type == CRSF_FRAMETYPE_RC_CHANNELS_PACKED &&
+                 payload_size < CRSF_FRAME_RC_CHANNELS_PAYLOAD_SIZE) ||
+                (type == CRSF_FRAMETYPE_LINK_STATISTICS &&
+                 payload_size < CRSF_FRAME_LINK_STATISTICS_PAYLOAD_SIZE)) {
+                ++offset;
+                continue;
             }
         }
-    } while (reprocess);
-}
-
-
-void CrsfParser::process_packet_in()
-{   
-    _last_receive_time = millis(this->start_time);
-
-    const Frame *frame = (Frame *)rx_buffer.data();
-    if (frame->device_address == CRSF_ADDRESS_FLIGHT_CONTROLLER)
-    {
-        switch (frame->type)
-        {
-        case CRSF_FRAMETYPE_RC_CHANNELS_PACKED:
-            compile_channels_packet(frame);
-            break;
-        case CRSF_FRAMETYPE_LINK_STATISTICS:
-            compile_link_statistics_packet(frame);
+        const std::size_t frame_size = len + 2;
+        if (available < frame_size) {
+            if (expired) {
+                ++offset;
+                continue;
+            }
             break;
         }
-    }
-}
-
-void CrsfParser::shift_left_rx_buffer(uint8_t cnt)
-{
-    if (cnt >= rx_buffer.size())
-    {
-        rx_buffer.clear();
-        return;
-    }
-
-    rx_buffer.erase(rx_buffer.begin(), rx_buffer.begin() + cnt);
-}
-
-
-void CrsfParser::shift_left_rx_buffer_until_byte(uint8_t key)
-{
-    for (unsigned long i = 1; i < rx_buffer.size(); i++)
-    {
-        if (rx_buffer[i] == key)
-        {
-            rx_buffer.erase(rx_buffer.begin(), rx_buffer.begin() + i);
-            return;
+        const uint8_t crc = _crc.calc(rx_buffer.data() + offset + 2, len - 1);
+        if (crc != rx_buffer[offset + frame_size - 1]) {
+            // A corrupt length must not discard a following valid frame.
+            ++offset;
+            continue;
         }
+        // Recovery on a later timer tick must not make buffered old RC data
+        // appear to have arrived just now.
+        process_packet_in(rx_buffer[offset + 2], rx_buffer.data() + offset + 3, _last_byte_time);
+        offset += frame_size;
     }
-
-    // If can not find sync byte
-    rx_buffer.clear();
+    rx_buffer.erase(rx_buffer.begin(), rx_buffer.begin() + offset);
+    _buffered_size = rx_buffer.size();
 }
 
-bool CrsfParser::is_channels_actual() 
+void CrsfParser::process_packet_in(uint8_t type, const uint8_t* payload, Clock::time_point now)
 {
-    return millis(this->start_time) - _last_channels_time < CRSF_RC_CHANNELS_TIMEOUT_MS; 
+    if (type == CRSF_FRAMETYPE_RC_CHANNELS_PACKED) {
+        // Sixteen unsigned 11-bit values, least significant bit first.
+        // Explicit decoding avoids compiler-dependent C++ bit-field layouts.
+        uint32_t bits = 0;
+        unsigned int bit_count = 0;
+        std::size_t pos = 0;
+        for (auto& channel : _channels) {
+            while (bit_count < 11) {
+                bits |= static_cast<uint32_t>(payload[pos++]) << bit_count;
+                bit_count += 8;
+            }
+            channel = bits & 0x7ff;
+            bits >>= 11;
+            bit_count -= 11;
+        }
+        _last_channels_time = now;
+        _has_channels = true;
+        ++_channels_sequence;
+    } else if (type == CRSF_FRAMETYPE_LINK_STATISTICS) {
+        static_assert(sizeof(link_statistics_packet) == CRSF_FRAME_LINK_STATISTICS_PAYLOAD_SIZE);
+        std::memcpy(&link_statistics_packet, payload, sizeof(link_statistics_packet));
+        _last_link_statistics_time = now;
+        _has_link_statistics = true;
+        ++_link_statistics_sequence;
+    }
 }
 
-
-bool CrsfParser::is_link_statistics_actual() 
+int CrsfParser::get_channel_value(unsigned int ch) const
 {
-    return millis(this->start_time) - _last_link_statistics_time < CRSF_LINK_STATISTICS_TIMEOUT_MS; 
+    if (ch < 1 || ch > CRSF_NUM_CHANNELS) {
+        throw std::out_of_range("CRSF channel must be between 1 and 16");
+    }
+    return _channels[ch - 1];
 }
 
-
-bool CrsfParser::is_link_up()
+bool CrsfParser::is_channels_actual() const
 {
-    return millis(this->start_time) - _last_receive_time < CRSF_FAILSAFE_STAGE1_MS;
+    return _has_channels && Clock::now() - _last_channels_time <
+        std::chrono::milliseconds(CRSF_RC_CHANNELS_TIMEOUT_MS);
 }
 
-
-void CrsfParser::compile_channels_packet(const Frame *p)
+bool CrsfParser::is_link_statistics_actual() const
 {
-    CrsfChannels *ch = (CrsfChannels *)&p->payload;
-    _channels[0] = ch->ch0;
-    _channels[1] = ch->ch1;
-    _channels[2] = ch->ch2;
-    _channels[3] = ch->ch3;
-    _channels[4] = ch->ch4;
-    _channels[5] = ch->ch5;
-    _channels[6] = ch->ch6;
-    _channels[7] = ch->ch7;
-    _channels[8] = ch->ch8;
-    _channels[9] = ch->ch9;
-    _channels[10] = ch->ch10;
-    _channels[11] = ch->ch11;
-    _channels[12] = ch->ch12;
-    _channels[13] = ch->ch13;
-    _channels[14] = ch->ch14;
-    _channels[15] = ch->ch15;
-
-    _last_channels_time = millis(this->start_time);
+    return _has_link_statistics && Clock::now() - _last_link_statistics_time <
+        std::chrono::milliseconds(CRSF_LINK_STATISTICS_TIMEOUT_MS);
 }
 
-void CrsfParser::compile_link_statistics_packet(const Frame *p)
+bool CrsfParser::is_link_up() const
 {
-    const LinkStatisticsFrame *link = (LinkStatisticsFrame *)p->payload;
-    memcpy(&link_statistics_packet, link, sizeof(link_statistics_packet));
-
-    _last_link_statistics_time = millis(this->start_time);
+    // Telemetry, noise and unrelated frames must never keep RC control alive.
+    return _has_channels && Clock::now() - _last_channels_time <
+        std::chrono::milliseconds(CRSF_FAILSAFE_STAGE1_MS);
 }

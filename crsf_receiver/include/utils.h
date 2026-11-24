@@ -15,7 +15,7 @@ clock_t millis(std::chrono::time_point<std::chrono::high_resolution_clock> start
 
 long convert_range(long x, double in_min, double in_max, double out_min, double out_max);
 
-CRSFChannels16 convert_to_channels_message(int* channels);
+CRSFChannels16 convert_to_channels_message(const int* channels);
 CRSFLinkInfo convert_to_link_info(LinkStatisticsFrame info);
 
 

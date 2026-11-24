@@ -1,0 +1,9 @@
+# Apply these parameters even when the node is renamed or namespaced.
+/**:
+  ros__parameters:
+    # Linux UART device or a stable /dev/serial/by-id/... path.
+    device: "/dev/serial0"
+    baudrate: 420000
+    link_stats: true
+    # Maximum publication rate in Hz (1..1000).
+    receiver_rate: 100

@@ -1,7 +1,7 @@
 std_msgs/UInt8 uplink_rssi_ant1
 std_msgs/UInt8 uplink_rssi_ant2
 std_msgs/UInt8 uplink_status
-std_msgs/UInt8 uplink_snr
+std_msgs/Int8  uplink_snr
 std_msgs/UInt8 active_antenna
 std_msgs/UInt8 rf_mode
 std_msgs/UInt8 uplink_tx_power
