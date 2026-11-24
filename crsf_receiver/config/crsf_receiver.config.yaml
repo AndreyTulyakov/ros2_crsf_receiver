@@ -7,3 +7,8 @@
     link_stats: true
     # Maximum publication rate in Hz (1..1000).
     receiver_rate: 100
+    # Optional ROS battery -> CRSF 0x08 telemetry; disabled by default.
+    telemetry_enabled: false
+    telemetry_battery_topic: "telemetry/battery"
+    telemetry_rate: 2.0       # UART transmission rate, 0.1..20 Hz.
+    telemetry_timeout: 1.0    # Maximum age since ROS receipt, in seconds.

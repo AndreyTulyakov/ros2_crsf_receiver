@@ -3,6 +3,9 @@
 
 #include <vector>
 #include <mutex>
+#include <optional>
+#include "sensor_msgs/msg/battery_state.hpp"
+#include "serial_telemetry_writer.h"
 
 
 #include "rclcpp/rclcpp.hpp"
@@ -34,6 +37,7 @@ public:
 private:
   std::unique_ptr<IoContext>     serial_io_context;
   std::unique_ptr<SerialDriver>  serial_driver;
+  std::shared_ptr<SerialTelemetryWriter> telemetry_writer;
 
   CrsfParser parser;
   std::mutex parser_mutex;
@@ -45,6 +49,16 @@ private:
 
   std::string device;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::TimerBase::SharedPtr telemetry_timer;
+  rclcpp::Subscription<sensor_msgs::msg::BatteryState>::SharedPtr battery_subscription;
+  bool telemetry_enabled = false;
+  double telemetry_timeout = 1.0;
+  std::mutex battery_mutex;
+  struct BatterySample {
+    std::vector<uint8_t> frame;
+    std::chrono::steady_clock::time_point received_at;
+  };
+  std::optional<BatterySample> battery_sample;
 
   rclcpp::Publisher<CRSFChannels16>::SharedPtr channels_publisher;
   rclcpp::Publisher<CRSFLinkInfo>::SharedPtr link_publisher;
@@ -52,6 +66,9 @@ private:
   void main_timer_callback();
   // After construction, serial operations run only on the single I/O thread.
   void open_serial_port();
+  void open_telemetry_port();
+  void battery_callback(const sensor_msgs::msg::BatteryState& battery);
+  void telemetry_timer_callback();
   void receive_callback(const std::vector<uint8_t> & buffer, const size_t & bytes_transferred);
 };
 

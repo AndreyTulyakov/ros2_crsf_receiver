@@ -7,6 +7,9 @@ from `ros-drivers/transport_drivers`, with standalone ASIO. CppLinuxSerial is no
 longer required. The `serial_bridge` executable is not needed: this node opens
 the UART directly through the library.
 
+Optionally forward battery telemetry from a ROS `BatteryState` topic to the
+handset using CRSF frame `0x08`. Transmission is disabled by default.
+
 Protocol reference: [Team BlackSheep CRSF specification](https://github.com/tbs-fpv/tbs-crsf-spec/blob/main/crsf.md).
 
 ## Topics
@@ -15,8 +18,10 @@ Protocol reference: [Team BlackSheep CRSF specification](https://github.com/tbs-
 | --- | --- | --- |
 | `rc/channels` | `crsf_receiver_msg/msg/CRSFChannels16` | Sixteen raw 11-bit channel values |
 | `rc/link` | `crsf_receiver_msg/msg/CRSFLinkInfo` | Received CRSF link statistics |
+| `telemetry/battery` | `sensor_msgs/msg/BatteryState` | Optional subscription for battery telemetry |
 
-Both publishers use best-effort reliability, volatile durability and depth 1.
+The two RC publishers and optional battery subscription use best-effort
+reliability, volatile durability and depth 1.
 With no ROS namespace, the topics are `/rc/channels` and `/rc/link`.
 
 ## Installation
@@ -116,9 +121,10 @@ discarding a following valid frame. Incomplete frames expire after 100 ms withou
 new bytes. A missing or disconnected serial port is retried once per second.
 `device` should be a stable path if USB adapters can change their device number.
 
-This is a receiver-only node: it decodes `0x16` (sixteen raw 11-bit channels,
+On reception, the node decodes `0x16` (sixteen raw 11-bit channels,
 `0..2047`, center `992`) and `0x14` (link statistics), with `0xC8` framing.
-It does not implement every CRSF frame type or send telemetry to the handset.
+It does not implement every CRSF frame type. Optional transmission supports only
+the battery frame `0x08` described below.
 
 **Interface change:** `CRSFLinkInfo.uplink_snr` is now `std_msgs/Int8`, matching
 the CRSF signed SNR field and `downlink_snr`. Rebuild message consumers and restart
@@ -144,6 +150,63 @@ and installed under `share/crsf_receiver/config`. Its `/**` selector supports
 renamed and namespaced nodes. To customize it, copy the file and pass the copy
 with `--params-file`; command-line `-p` arguments placed afterward can override
 individual values, for example `-p device:=/dev/ttyUSB0`.
+
+### Optional battery telemetry
+
+Connect both UART directions: receiver TX -> computer RX for RC input, and
+computer TX -> receiver RX for battery telemetry, with a common ground. Enable
+telemetry on the ELRS/handset side and discover the battery sensors there.
+
+These parameters are read at startup:
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `telemetry_enabled` | `false` | Enable the battery subscription and UART TX |
+| `telemetry_battery_topic` | `telemetry/battery` | Input topic; relative names follow the node namespace |
+| `telemetry_rate` | `2.0` | UART transmission rate, `0.1..20.0` Hz |
+| `telemetry_timeout` | `1.0` | Maximum age since ROS receipt, `0 < timeout <= 3600` seconds |
+
+For example, run the node and publish a battery sample in another sourced terminal:
+
+```bash
+ros2 run crsf_receiver crsf_receiver_node --ros-args \
+  --params-file "$(ros2 pkg prefix --share crsf_receiver)/config/crsf_receiver.config.yaml" \
+  -p device:=/dev/ttyUSB0 -p telemetry_enabled:=true
+```
+
+```bash
+ros2 topic pub --rate 5 /telemetry/battery sensor_msgs/msg/BatteryState \
+  '{present: true, voltage: 25.2, current: -12.3, capacity: 10.0, charge: 7.5, percentage: 0.75}'
+```
+
+The encoder expects one present battery with finite voltage/current and valid
+`capacity > 0` and `0 <= charge <= capacity`, in ROS units (V, A, Ah). It sends:
+
+- Voltage and discharge current with 0.1 V / 0.1 A resolution. ROS discharge
+  current is negative; CRSF consumption current is positive. Charging reports
+  0 A for compatibility with handsets decoding this field as unsigned.
+- Consumed charge as `round((capacity - charge) * 1000)` mAh. `charge` itself is
+  remaining charge and is never treated as consumed capacity.
+- Remaining percentage as `round(percentage * 100)`. A NaN percentage falls back
+  to `charge / capacity`; a finite percentage must be in `0..1`.
+
+Unknown mandatory fields, an absent battery, inconsistent charge/capacity and
+values outside the wire ranges stop transmission rather than producing wrapped
+or invented readings. Voltage and absolute current must not exceed 3276.7 V/A;
+consumed charge must fit 24 bits. No measurements are estimated or integrated.
+
+The latest valid sample is repeated at `telemetry_rate` only while fresh. Age
+uses a monotonic clock from ROS receipt, not the message's acquisition timestamp.
+Stale samples stop being sent. Reconnection clears the cache and requires a new
+ROS sample. Actual handset update rate also depends on ELRS air rate/telemetry
+ratio; the displayed value may remain until the handset marks its sensor stale.
+
+TX uses a separate nonblocking descriptor of the same configured UART on the
+existing ASIO thread; it does not modify UART settings or require changes to
+transport_drivers. Complete asynchronous writes own their buffers, retain at
+most one active and one latest waiting frame, and discard expired waiting data.
+A TX failure does not stop RC reception and is retried once per second. When
+disabled there is no battery subscription, telemetry timer or TX descriptor.
 
 ### Check
 
@@ -187,6 +250,7 @@ colcon test --packages-select crsf_receiver
 colcon test-result --verbose
 # Use an unused ROS domain; this opens only temporary PTYs, no robot devices:
 ROS_DOMAIN_ID=151 python3 src/ros2_crsf_receiver/crsf_receiver/test/test_serial_pty.py
+ROS_DOMAIN_ID=153 python3 src/ros2_crsf_receiver/crsf_receiver/test/test_battery_pty.py
 ```
 
 The C++ tests cover startup validity, all channel bits, every frame split point,
@@ -194,3 +258,6 @@ CRC and length errors, the repeated-sync regression from the Godbolt comment,
 partial-frame recovery, signed SNR, freshness and randomized input. The PTY test
 runs the actual ROS node, including device appearance, disconnect/reconnect,
 `link_stats:=false`, sample deduplication and shutdown during serial input.
+Battery tests verify the encoder's units, field ranges and CRC, TX buffer
+ownership/backpressure, disabled mode, fresh/stale/invalid input, rate limiting,
+simultaneous RC reception, and battery cache reset across UART reconnection.

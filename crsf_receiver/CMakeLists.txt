@@ -15,6 +15,7 @@ find_package(rclcpp REQUIRED)
 find_package(serial_driver REQUIRED)
 find_package(io_context REQUIRED)
 find_package(crsf_receiver_msg REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(asio_cmake_module REQUIRED)
 find_package(ASIO REQUIRED)
 
@@ -26,6 +27,8 @@ add_executable(crsf_receiver_node
   src/crsf_parser.cpp
   src/crc8.cpp
   src/utils.cpp
+  src/battery_telemetry.cpp
+  src/serial_telemetry_writer.cpp
 )
 
 
@@ -40,6 +43,7 @@ target_compile_definitions(crsf_receiver_node PRIVATE ${ASIO_DEFINITIONS})
 
 target_link_libraries(crsf_receiver_node
   ${crsf_receiver_msg_TARGETS}
+  ${sensor_msgs_TARGETS}
   rclcpp::rclcpp
   ${serial_driver_LIBRARIES}
   ${io_context_LIBRARIES}
@@ -61,6 +65,15 @@ if(BUILD_TESTING)
   ament_add_gtest(test_crsf_messages test/test_crsf_messages.cpp src/utils.cpp)
   target_include_directories(test_crsf_messages PRIVATE include)
   target_link_libraries(test_crsf_messages ${crsf_receiver_msg_TARGETS})
+  ament_add_gtest(test_battery_telemetry
+    test/test_battery_telemetry.cpp src/battery_telemetry.cpp src/crc8.cpp)
+  target_include_directories(test_battery_telemetry PRIVATE include)
+  target_link_libraries(test_battery_telemetry ${sensor_msgs_TARGETS})
+  ament_add_gtest(test_serial_telemetry_writer
+    test/test_serial_telemetry_writer.cpp src/serial_telemetry_writer.cpp TIMEOUT 10)
+  target_include_directories(test_serial_telemetry_writer PRIVATE include)
+  target_include_directories(test_serial_telemetry_writer SYSTEM PRIVATE ${ASIO_INCLUDE_DIRS})
+  target_compile_definitions(test_serial_telemetry_writer PRIVATE ${ASIO_DEFINITIONS})
 endif()
 
 ament_package()
