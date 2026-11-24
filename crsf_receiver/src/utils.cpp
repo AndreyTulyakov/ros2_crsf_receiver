@@ -17,7 +17,7 @@ long convert_range(long x, double in_min, double in_max, double out_min, double 
 }
 
 
-CRSFChannels16 convert_to_channels_message(int* channels) {
+CRSFChannels16 convert_to_channels_message(const int* channels) {
     CRSFChannels16 message;
 
     message.ch1 = channels[0];

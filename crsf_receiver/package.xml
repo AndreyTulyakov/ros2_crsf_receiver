@@ -4,16 +4,23 @@
   <name>crsf_receiver</name>
   <version>0.0.1</version>
   <description>ROS 2 package for receiving CRSF (RC channels values) packets over serial port (UART).</description>
-  <maintainer email="mhyhre@gmail.com">Andrey T</maintainer>
+  <maintainer email="mhyhre@gmail.com">Andrey Tulyakov</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>asio_cmake_module</buildtool_depend>
+  <build_depend>asio</build_depend>
   
   <depend>rclcpp</depend>
+  <depend>serial_driver</depend>
+  <depend>io_context</depend>
   <depend>crsf_receiver_msg</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>rclpy</test_depend>
+  <test_depend>ament_index_python</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
